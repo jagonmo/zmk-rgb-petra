@@ -1,0 +1,48 @@
+/*
+ * Backlog - petra original effects (flag, layer-color).
+ * Compiled but NOT part of the active RGBP_EFF cycle. Reachable only if
+ * state.effect is set to one of these explicitly.
+ */
+
+#include <zmk_vfx_petra/effects.h>
+
+#if IS_ENABLED(CONFIG_ZMK_KEYMAP)
+#include <zmk/keymap.h>
+#endif
+
+/* Flag: horizontal rainbow across columns, travelling left-to-right, with a
+ * slight per-row skew so it undulates like a flag. */
+static void e_flag(void) {
+    for (int i = 0; i < RGB_PETRA_NUM_KEYS; i++) {
+        uint16_t col_hue = led_col[i] * 360 / RGB_PETRA_COLS;
+        uint16_t row_skew = led_row[i] * 18;
+        uint16_t h = (state.hue + state.phase + col_hue + row_skew) % 360;
+        pixels[i] = rgbp_hsb(h, state.sat, state.brt);
+    }
+}
+
+/* Layer-color: base hue by highest active layer; pressed keys flash the
+ * complementary color. */
+static void e_layer_color(void) {
+    uint8_t layer = 0;
+#if IS_ENABLED(CONFIG_ZMK_KEYMAP)
+    layer = zmk_keymap_highest_layer_active();
+#endif
+    uint16_t h = (state.hue + layer * 40) % 360;
+    struct led_rgb base = rgbp_hsb(h, state.sat, state.brt);
+    for (int i = 0; i < RGB_PETRA_NUM_KEYS; i++) {
+        pixels[i] = base;
+        if (reactive[i]) {
+            struct led_rgb hot = rgbp_hsb((h + 180) % 360, state.sat, state.brt);
+            pixels[i] = rgbp_scale(hot, reactive[i]);
+        }
+    }
+}
+
+void rgbp_render_backlog(enum rgb_petra_effect eff) {
+    switch (eff) {
+    case RGB_PETRA_EFF_FLAG:        e_flag(); break;
+    case RGB_PETRA_EFF_LAYER_COLOR: e_layer_color(); break;
+    default:                        e_flag(); break;
+    }
+}
