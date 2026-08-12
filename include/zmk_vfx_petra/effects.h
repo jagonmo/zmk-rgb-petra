@@ -15,8 +15,6 @@
 enum rgb_petra_effect {
     /* Tanda 1: base (non-reactive) */
     RGB_PETRA_EFF_SOLID = 0,
-    RGB_PETRA_EFF_GRADIENT_UP_DOWN,
-    RGB_PETRA_EFF_GRADIENT_LEFT_RIGHT,
     RGB_PETRA_EFF_BREATHING,
     RGB_PETRA_EFF_BAND_SAT,
     RGB_PETRA_EFF_BAND_VAL,
@@ -62,14 +60,15 @@ enum rgb_petra_effect {
     RGB_PETRA_EFF_SOLID_SPLASH,
     RGB_PETRA_EFF_SOLID_MULTISPLASH,
 
+    /* petra originals, now part of the active cycle */
+    RGB_PETRA_EFF_FLAG,
+    RGB_PETRA_EFF_LAYER_COLOR,
+    RGB_PETRA_EFF_COMPLEMENT,
+
     /* End of the active cycle. */
     RGB_PETRA_EFF_ACTIVE_END,
 
-    /* Backlog: compiled but not in the cycle (petra originals). */
-    RGB_PETRA_EFF_FLAG = RGB_PETRA_EFF_ACTIVE_END,
-    RGB_PETRA_EFF_LAYER_COLOR,
-
-    RGB_PETRA_EFF_NUM,
+    RGB_PETRA_EFF_NUM = RGB_PETRA_EFF_ACTIVE_END,
 };
 
 /* ---- Shared global state (defined in rgb_petra.c) ---- */

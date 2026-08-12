@@ -56,20 +56,6 @@ static void e_solid(void) {
     for (int i = 0; i < NKEYS; i++) pixels[i] = c;
 }
 
-static void e_gradient_up_down(void) {
-    for (int i = 0; i < NKEYS; i++) {
-        uint8_t v = state.brt - (led_row[i] * state.brt / (RGB_PETRA_ROWS - 1));
-        pixels[i] = rgbp_hsb(state.hue, state.sat, v);
-    }
-}
-
-static void e_gradient_left_right(void) {
-    for (int i = 0; i < NKEYS; i++) {
-        uint8_t v = state.brt - (led_col[i] * state.brt / (RGB_PETRA_COLS - 1));
-        pixels[i] = rgbp_hsb(state.hue, state.sat, v);
-    }
-}
-
 static void e_breathing(void) {
     uint8_t p = state.phase & 0xFF;
     uint8_t tri = (state.phase & 0x100) ? (255 - p) : p;
@@ -240,8 +226,6 @@ static void e_rainbow_pinwheels(void) {
 void rgbp_render_base(enum rgb_petra_effect eff) {
     switch (eff) {
     case RGB_PETRA_EFF_SOLID:                 e_solid(); break;
-    case RGB_PETRA_EFF_GRADIENT_UP_DOWN:      e_gradient_up_down(); break;
-    case RGB_PETRA_EFF_GRADIENT_LEFT_RIGHT:   e_gradient_left_right(); break;
     case RGB_PETRA_EFF_BREATHING:             e_breathing(); break;
     case RGB_PETRA_EFF_BAND_SAT:              e_band_sat(); break;
     case RGB_PETRA_EFF_BAND_VAL:              e_band_val(); break;

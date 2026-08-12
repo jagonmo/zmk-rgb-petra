@@ -118,7 +118,7 @@ static void decay_reactive(void) {
 static void render_current(void) {
     enum rgb_petra_effect e = state.effect;
 
-    if (e >= RGB_PETRA_EFF_ACTIVE_END) {
+    if (e >= RGB_PETRA_EFF_FLAG) {
         rgbp_render_backlog(e);
     } else if (e >= RGB_PETRA_EFF_TYPING_HEATMAP) {
         rgbp_render_reactive(e);

@@ -39,10 +39,21 @@ static void e_layer_color(void) {
     }
 }
 
+/* Complement: fixed base-hue background; pressed keys flash the complementary
+ * color (hue + 180). Like layer-color but the background never changes. */
+static void e_complement(void) {
+    struct led_rgb base = rgbp_hsb(state.hue, state.sat, state.brt);
+    struct led_rgb comp = rgbp_hsb((state.hue + 180) % 360, state.sat, state.brt);
+    for (int i = 0; i < RGB_PETRA_NUM_KEYS; i++) {
+        pixels[i] = reactive[i] ? rgbp_scale(comp, reactive[i]) : base;
+    }
+}
+
 void rgbp_render_backlog(enum rgb_petra_effect eff) {
     switch (eff) {
     case RGB_PETRA_EFF_FLAG:        e_flag(); break;
     case RGB_PETRA_EFF_LAYER_COLOR: e_layer_color(); break;
+    case RGB_PETRA_EFF_COMPLEMENT:  e_complement(); break;
     default:                        e_flag(); break;
     }
 }
