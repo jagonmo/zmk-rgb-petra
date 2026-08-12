@@ -1,0 +1,59 @@
+menuconfig RGB_PETRA
+    bool "Petra per-key reactive RGB"
+    select LED_STRIP
+    help
+      Enable the custom per-key reactive RGB system for the Petra/flatcat
+      keyboard. Replaces the stock ZMK RGB underglow with animated base
+      patterns plus per-key reactive effects, using the manual serpentine
+      LED mapping defined in key_led_map.h.
+
+if RGB_PETRA
+
+config RGB_PETRA_TICK_MS
+    int "Animation tick interval (ms)"
+    default 33
+    help
+      Interval between animation frames. 33ms ~= 30 FPS. Lower is smoother
+      but uses more CPU/battery.
+
+config RGB_PETRA_BRT_START
+    int "Startup brightness (0-100)"
+    default 40
+    range 0 100
+
+config RGB_PETRA_BRT_STEP
+    int "Brightness step per key press (0-100)"
+    default 10
+    range 1 100
+
+config RGB_PETRA_HUE_STEP
+    int "Hue step (degrees) per key press"
+    default 15
+    range 1 360
+
+config RGB_PETRA_REACTIVE_DECAY
+    int "Reactive fade decay per frame (0-255)"
+    default 12
+    range 1 255
+    help
+      How much a reactive key's intensity drops each animation frame.
+      Higher = faster fade-out.
+
+config RGB_PETRA_AUTO_OFF_IDLE
+    bool "Turn off LEDs when keyboard is idle"
+    default y
+
+config RGB_PETRA_START_ON
+    bool "Start with RGB on at boot"
+    default y
+
+endif # RGB_PETRA
+
+# Behavior symbol following ZMK's canonical pattern: defaults on when the
+# behavior node is present in the devicetree, and gates compilation of
+# behavior_rgb_petra.c via CMakeLists.txt. Without this the DT node exists
+# but the driver is never linked -> "No behavior assigned".
+config ZMK_BEHAVIOR_RGB_PETRA
+    bool
+    default y
+    depends on DT_HAS_ZMK_BEHAVIOR_RGB_PETRA_ENABLED

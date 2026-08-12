@@ -1,0 +1,5 @@
+description: Petra RGB control behavior
+
+compatible: "zmk,behavior-rgb-petra"
+
+include: two_param.yaml
