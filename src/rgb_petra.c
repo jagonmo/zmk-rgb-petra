@@ -42,6 +42,31 @@ static struct led_rgb pixels[STRIP_NUM_PIXELS];
 /* Per-LED reactive intensity (0-255), decayed each frame. */
 static uint8_t reactive[STRIP_NUM_PIXELS];
 
+/* Physical column (0-13) and row (0-5) of each LED in the chain, derived
+ * from the serpentine wiring. Used by the flag (horizontal swirl) effect. */
+static const uint8_t led_col[RGB_PETRA_NUM_KEYS] = {
+    4, 5, 6, 7, 8, 13, 13, 13, 13, 13, 12, 11, 10,
+    9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 1, 2,
+    3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 12, 11, 10,
+    9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 1, 2,
+    3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 12, 11, 10,
+    9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 1, 2,
+    3,
+};
+
+static const uint8_t led_row[RGB_PETRA_NUM_KEYS] = {
+    5, 5, 5, 5, 5, 4, 3, 2, 1, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2,
+    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3,
+    3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4,
+    4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5,
+    5,
+};
+
+#define RGB_PETRA_COLS 14
+#define RGB_PETRA_ROWS 6
+
 struct rgb_petra_state {
     bool on;
     enum rgb_petra_effect effect;
@@ -129,6 +154,19 @@ static void render_swirl(void) {
     }
 }
 
+/* Flag: full rainbow spread across the width (by column), travelling left to
+ * right, with a slight per-row skew so the wave undulates like a flag. */
+static void render_flag(void) {
+    for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
+        /* one full rainbow across the 14 columns */
+        uint16_t col_hue = led_col[i] * 360 / RGB_PETRA_COLS;
+        /* gentle diagonal skew: each row down shifts the wave a bit */
+        uint16_t row_skew = led_row[i] * 18;
+        uint16_t h = (state.hue + state.phase + col_hue + row_skew) % 360;
+        pixels[i] = hsb_to_rgb(h, state.sat, state.brt);
+    }
+}
+
 /* ---- Reactive renderers ---- */
 
 static void render_reactive_flash(void) {
@@ -196,6 +234,7 @@ static void rgb_petra_tick(struct k_work *work) {
     case RGB_PETRA_EFF_BREATHE:        render_breathe(); break;
     case RGB_PETRA_EFF_SPECTRUM:       render_spectrum(); break;
     case RGB_PETRA_EFF_SWIRL:          render_swirl(); break;
+    case RGB_PETRA_EFF_FLAG:           render_flag(); break;
     case RGB_PETRA_EFF_REACTIVE_FLASH: render_reactive_flash(); break;
     case RGB_PETRA_EFF_REACTIVE_TRAIL: render_reactive_trail(); break;
     case RGB_PETRA_EFF_LAYER_COLOR:    render_layer_color(); break;
