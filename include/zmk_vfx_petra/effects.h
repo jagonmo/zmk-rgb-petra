@@ -108,5 +108,7 @@ void rgbp_render_base(enum rgb_petra_effect eff);
 void rgbp_render_animated(enum rgb_petra_effect eff);
 /* effects_reactive.c */
 void rgbp_render_reactive(enum rgb_petra_effect eff);
+/* Record a key press for spatial reactive effects (called from core listener). */
+void rgbp_reactive_note_press(uint8_t led);
 /* effects_backlog.c */
 void rgbp_render_backlog(enum rgb_petra_effect eff);

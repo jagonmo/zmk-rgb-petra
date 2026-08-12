@@ -241,6 +241,7 @@ static int rgb_petra_key_listener(const zmk_event_t *eh) {
         uint8_t led = key_to_led[ev->position];
         if (led < RGB_PETRA_NUM_KEYS) {
             reactive[led] = 255;
+            rgbp_reactive_note_press(led);
         }
     }
     return ZMK_EV_EVENT_BUBBLE;
