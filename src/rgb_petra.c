@@ -22,6 +22,11 @@
 #include <zmk/events/activity_state_changed.h>
 #include <zmk/keymap.h>
 
+#if IS_ENABLED(CONFIG_RGB_PETRA_CAPS_INDICATOR)
+#include <zmk/hid_indicators.h>
+#include <dt-bindings/zmk/hid_indicators.h>
+#endif
+
 #include <zmk_vfx_petra/rgb_petra.h>
 #include <zmk_vfx_petra/key_led_map.h>
 #include <zmk_vfx_petra/effects.h>
@@ -114,6 +119,25 @@ static void decay_reactive(void) {
     }
 }
 
+/* ---- Caps-lock indicator overlay ---- */
+#if IS_ENABLED(CONFIG_RGB_PETRA_CAPS_INDICATOR)
+static void caps_overlay(void) {
+    zmk_hid_indicators_t ind = zmk_hid_indicators_get_current_profile();
+    if (!(ind & ZMK_LED_CAPSLOCK_BIT)) {
+        return;
+    }
+    /* blink: on for ~half a second, off for ~half a second (at ~30fps) */
+    bool blink_on = (state.phase / 15) & 1;
+    struct led_rgb c = blink_on ? (struct led_rgb){0, 255, 0}
+                                : (struct led_rgb){0, 0, 0};
+    if (CONFIG_RGB_PETRA_CAPS_LED < STRIP_NUM_PIXELS) {
+        pixels[CONFIG_RGB_PETRA_CAPS_LED] = c;
+    }
+}
+#else
+static void caps_overlay(void) {}
+#endif
+
 /* ---- Dispatch by enum range ---- */
 static void render_current(void) {
     enum rgb_petra_effect e = state.effect;
@@ -140,6 +164,7 @@ static void rgb_petra_tick(struct k_work *work) {
 
     render_current();
     decay_reactive();
+    caps_overlay();
 
     int err = led_strip_update_rgb(led_strip, pixels, STRIP_NUM_PIXELS);
     if (err < 0) {

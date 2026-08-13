@@ -47,6 +47,21 @@ config RGB_PETRA_START_ON
     bool "Start with RGB on at boot"
     default y
 
+config RGB_PETRA_CAPS_INDICATOR
+    bool "Blink the caps-lock key green when caps lock is active"
+    default y
+    help
+      Overlays a blinking green indicator on the caps-lock key's LED whenever
+      the host reports caps lock on, on top of whatever effect is running.
+
+config RGB_PETRA_CAPS_LED
+    int "LED index of the caps-lock key"
+    default 49
+    range 0 78
+    help
+      Physical LED index (in the WS2812 chain) of the caps-lock key. For the
+      flatcat serpentine wiring, CLCK is LED 49.
+
 endif # RGB_PETRA
 
 # Behavior symbol following ZMK's canonical pattern: defaults on when the
