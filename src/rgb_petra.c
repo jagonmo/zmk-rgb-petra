@@ -1,20 +1,20 @@
 /*
- * Petra per-key reactive RGB
+ * Petra per-key RGB - core.
  *
- * Replaces the stock ZMK RGB underglow with:
- *   - Animated base patterns (solid, breathe, spectrum, swirl)
- *   - Per-key reactive effects (flash, trail, layer color)
+ * Owns the shared global state (state, pixels, reactive, geometry tables),
+ * the HSB helper, the animation tick, the ext-power regulator, the behavior
+ * command entry, and the ZMK event listeners.
  *
- * The physical serpentine LED order is resolved through key_to_led[] in
- * key_led_map.h. Key events only mark state; the animation work handler is
- * the sole writer to the LED strip, so we never touch SPI from the event
- * callback.
+ * Effect rendering lives in per-family files (effects_base.c,
+ * effects_animated.c, effects_reactive.c, effects_backlog.c). The tick
+ * dispatches to the right family by enum range.
  */
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/led_strip.h>
+#include <zephyr/drivers/regulator.h>
 #include <zephyr/logging/log.h>
 
 #include <zmk/event_manager.h>
@@ -22,10 +22,13 @@
 #include <zmk/events/activity_state_changed.h>
 #include <zmk/keymap.h>
 
-#include <zephyr/drivers/regulator.h>
+#if IS_ENABLED(CONFIG_RGB_PETRA_CAPS_INDICATOR)
+#include <zmk/hid_indicators.h>
+#endif
 
 #include <zmk_vfx_petra/rgb_petra.h>
 #include <zmk_vfx_petra/key_led_map.h>
+#include <zmk_vfx_petra/effects.h>
 
 LOG_MODULE_REGISTER(rgb_petra, CONFIG_ZMK_LOG_LEVEL);
 
@@ -37,14 +40,21 @@ BUILD_ASSERT(STRIP_NUM_PIXELS >= RGB_PETRA_NUM_KEYS,
 
 static const struct device *led_strip = DEVICE_DT_GET(STRIP_CHOSEN);
 
-static struct led_rgb pixels[STRIP_NUM_PIXELS];
+/* ---- Shared globals (declared extern in effects.h) ---- */
+struct led_rgb pixels[RGB_PETRA_NUM_KEYS];
+uint8_t reactive[RGB_PETRA_NUM_KEYS];
 
-/* Per-LED reactive intensity (0-255), decayed each frame. */
-static uint8_t reactive[STRIP_NUM_PIXELS];
+struct rgb_petra_state state = {
+    .on = IS_ENABLED(CONFIG_RGB_PETRA_START_ON),
+    .effect = RGB_PETRA_EFF_SOLID,
+    .hue = 0,
+    .sat = 100,
+    .brt = CONFIG_RGB_PETRA_BRT_START,
+    .speed = 4,
+};
 
-/* Physical column (0-13) and row (0-5) of each LED in the chain, derived
- * from the serpentine wiring. Used by the flag (horizontal swirl) effect. */
-static const uint8_t led_col[RGB_PETRA_NUM_KEYS] = {
+/* Physical column (0-13) and row (0-5) of each LED, from serpentine wiring. */
+const uint8_t led_col[RGB_PETRA_NUM_KEYS] = {
     9, 10, 11, 12, 13, 13, 13, 13, 13, 13, 12, 11, 10,
     9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 1, 2,
     3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 12, 11, 10,
@@ -54,7 +64,7 @@ static const uint8_t led_col[RGB_PETRA_NUM_KEYS] = {
     6,
 };
 
-static const uint8_t led_row[RGB_PETRA_NUM_KEYS] = {
+const uint8_t led_row[RGB_PETRA_NUM_KEYS] = {
     5, 5, 5, 5, 5, 4, 3, 2, 1, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2,
@@ -64,33 +74,12 @@ static const uint8_t led_row[RGB_PETRA_NUM_KEYS] = {
     5,
 };
 
-#define RGB_PETRA_COLS 14
-#define RGB_PETRA_ROWS 6
-
-struct rgb_petra_state {
-    bool on;
-    enum rgb_petra_effect effect;
-    uint16_t hue;   /* 0-359 */
-    uint8_t sat;    /* 0-100 */
-    uint8_t brt;    /* 0-100 */
-    uint16_t phase; /* animation counter */
-};
-
-static struct rgb_petra_state state = {
-    .on = IS_ENABLED(CONFIG_RGB_PETRA_START_ON),
-    .effect = RGB_PETRA_EFF_SOLID,
-    .hue = 0,
-    .sat = 100,
-    .brt = CONFIG_RGB_PETRA_BRT_START,
-};
-
-/* ---- HSB -> RGB (integer math, h:0-359 s:0-100 b:0-100) ---- */
-static struct led_rgb hsb_to_rgb(uint16_t h, uint8_t s, uint8_t b) {
+/* ---- Shared helpers ---- */
+struct led_rgb rgbp_hsb(uint16_t h, uint8_t s, uint8_t b) {
     uint32_t rp = 0, gp = 0, bp = 0;
-
     uint8_t sector = (h / 60) % 6;
-    uint32_t f = h % 60;             /* 0-59 */
-    uint32_t v = b;                  /* 0-100 */
+    uint32_t f = h % 60;
+    uint32_t v = b;
     uint32_t p = v * (100 - s) / 100;
     uint32_t q = v * (100 - (s * f) / 60) / 100;
     uint32_t t = v * (100 - (s * (60 - f)) / 60) / 100;
@@ -112,105 +101,16 @@ static struct led_rgb hsb_to_rgb(uint16_t h, uint8_t s, uint8_t b) {
     return out;
 }
 
-static inline struct led_rgb scale(struct led_rgb c, uint8_t factor /*0-255*/) {
+struct led_rgb rgbp_scale(struct led_rgb c, uint8_t factor) {
     c.r = (uint16_t)c.r * factor / 255;
     c.g = (uint16_t)c.g * factor / 255;
     c.b = (uint16_t)c.b * factor / 255;
     return c;
 }
 
-/* ---- Base pattern renderers: fill pixels[] (physical order) ---- */
-
-static void render_solid(void) {
-    struct led_rgb c = hsb_to_rgb(state.hue, state.sat, state.brt);
-    for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
-        pixels[i] = c;
-    }
-}
-
-static void render_breathe(void) {
-    /* triangle wave 0..255..0 over ~256 frames */
-    uint8_t p = state.phase & 0xFF;
-    uint8_t tri = (state.phase & 0x100) ? (255 - p) : p;
-    uint8_t brt = (uint32_t)state.brt * tri / 255;
-    struct led_rgb c = hsb_to_rgb(state.hue, state.sat, brt);
-    for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
-        pixels[i] = c;
-    }
-}
-
-static void render_spectrum(void) {
-    uint16_t h = (state.hue + state.phase) % 360;
-    struct led_rgb c = hsb_to_rgb(h, state.sat, state.brt);
-    for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
-        pixels[i] = c;
-    }
-}
-
-static void render_swirl(void) {
-    for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
-        uint16_t h = (state.hue + state.phase + (i * 360 / STRIP_NUM_PIXELS)) % 360;
-        pixels[i] = hsb_to_rgb(h, state.sat, state.brt);
-    }
-}
-
-/* Flag: full rainbow spread across the width (by column), travelling left to
- * right, with a slight per-row skew so the wave undulates like a flag. */
-static void render_flag(void) {
-    for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
-        /* one full rainbow across the 14 columns */
-        uint16_t col_hue = led_col[i] * 360 / RGB_PETRA_COLS;
-        /* gentle diagonal skew: each row down shifts the wave a bit */
-        uint16_t row_skew = led_row[i] * 18;
-        uint16_t h = (state.hue + state.phase + col_hue + row_skew) % 360;
-        pixels[i] = hsb_to_rgb(h, state.sat, state.brt);
-    }
-}
-
-/* ---- Reactive renderers ---- */
-
-static void render_reactive_flash(void) {
-    /* dim base, keys light up to full on press then decay */
-    struct led_rgb base = hsb_to_rgb(state.hue, state.sat, state.brt / 6);
-    for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
-        if (reactive[i]) {
-            struct led_rgb hot = hsb_to_rgb(state.hue, state.sat, state.brt);
-            pixels[i] = scale(hot, reactive[i]);
-        } else {
-            pixels[i] = base;
-        }
-    }
-}
-
-static void render_reactive_trail(void) {
-    /* like flash but hue shifts with intensity for a trail feel */
-    for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
-        if (reactive[i]) {
-            uint16_t h = (state.hue + (255 - reactive[i])) % 360;
-            struct led_rgb hot = hsb_to_rgb(h, state.sat, state.brt);
-            pixels[i] = scale(hot, reactive[i]);
-        } else {
-            pixels[i] = (struct led_rgb){0, 0, 0};
-        }
-    }
-}
-
-static void render_layer_color(void) {
-    /* base hue derived from the highest active layer */
-    uint8_t layer = zmk_keymap_highest_layer_active();
-    uint16_t h = (state.hue + layer * 40) % 360;
-    struct led_rgb base = hsb_to_rgb(h, state.sat, state.brt);
-    for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
-        pixels[i] = base;
-        if (reactive[i]) {
-            struct led_rgb hot = hsb_to_rgb((h + 180) % 360, state.sat, state.brt);
-            pixels[i] = scale(hot, reactive[i]);
-        }
-    }
-}
-
+/* ---- Reactive decay ---- */
 static void decay_reactive(void) {
-    for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
+    for (int i = 0; i < RGB_PETRA_NUM_KEYS; i++) {
         if (reactive[i] > CONFIG_RGB_PETRA_REACTIVE_DECAY) {
             reactive[i] -= CONFIG_RGB_PETRA_REACTIVE_DECAY;
         } else {
@@ -219,8 +119,42 @@ static void decay_reactive(void) {
     }
 }
 
-/* ---- Animation tick ---- */
+/* ---- Caps-lock indicator overlay ---- */
+#if IS_ENABLED(CONFIG_RGB_PETRA_CAPS_INDICATOR)
+static void caps_overlay(void) {
+    zmk_hid_indicators_t ind = zmk_hid_indicators_get_current_profile();
+    /* Caps lock = bit 1 (0x02) per USB HID spec. */
+    if (!(ind & 0x02)) {
+        return;
+    }
+    /* blink: 1s on, 1s off — independent of animation speed */
+    bool blink_on = (k_uptime_get() / 1000) & 1;
+    struct led_rgb c = blink_on ? (struct led_rgb){0, 255, 0}
+                                : (struct led_rgb){0, 0, 0};
+    if (CONFIG_RGB_PETRA_CAPS_LED < STRIP_NUM_PIXELS) {
+        pixels[CONFIG_RGB_PETRA_CAPS_LED] = c;
+    }
+}
+#else
+static void caps_overlay(void) {}
+#endif
 
+/* ---- Dispatch by enum range ---- */
+static void render_current(void) {
+    enum rgb_petra_effect e = state.effect;
+
+    if (e >= RGB_PETRA_EFF_FLAG) {
+        rgbp_render_backlog(e);
+    } else if (e >= RGB_PETRA_EFF_TYPING_HEATMAP) {
+        rgbp_render_reactive(e);
+    } else if (e >= RGB_PETRA_EFF_RAINDROPS) {
+        rgbp_render_animated(e);
+    } else {
+        rgbp_render_base(e);
+    }
+}
+
+/* ---- Animation tick ---- */
 static void rgb_petra_tick(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(rgb_petra_work, rgb_petra_tick);
 
@@ -229,28 +163,16 @@ static void rgb_petra_tick(struct k_work *work) {
         return;
     }
 
-    switch (state.effect) {
-    case RGB_PETRA_EFF_SOLID:          render_solid(); break;
-    case RGB_PETRA_EFF_BREATHE:        render_breathe(); break;
-    case RGB_PETRA_EFF_SPECTRUM:       render_spectrum(); break;
-    case RGB_PETRA_EFF_SWIRL:          render_swirl(); break;
-    case RGB_PETRA_EFF_FLAG:           render_flag(); break;
-    case RGB_PETRA_EFF_REACTIVE_FLASH: render_reactive_flash(); break;
-    case RGB_PETRA_EFF_REACTIVE_TRAIL: render_reactive_trail(); break;
-    case RGB_PETRA_EFF_LAYER_COLOR:    render_layer_color(); break;
-    default: render_solid(); break;
-    }
-
+    render_current();
     decay_reactive();
+    caps_overlay();
 
     int err = led_strip_update_rgb(led_strip, pixels, STRIP_NUM_PIXELS);
     if (err < 0) {
         LOG_ERR("led_strip_update_rgb failed: %d", err);
-    } else if (state.phase == 0) {
-        LOG_INF("first frame written to strip OK");
     }
 
-    state.phase++;
+    state.phase += state.speed;
     k_work_reschedule(&rgb_petra_work, K_MSEC(CONFIG_RGB_PETRA_TICK_MS));
 }
 
@@ -259,6 +181,7 @@ static void clear_strip(void) {
     led_strip_update_rgb(led_strip, pixels, STRIP_NUM_PIXELS);
 }
 
+/* ---- ext-power regulator ---- */
 #if DT_NODE_EXISTS(DT_NODELABEL(petra_led_pwr))
 static const struct device *led_pwr = DEVICE_DT_GET(DT_NODELABEL(petra_led_pwr));
 
@@ -288,10 +211,8 @@ static void stop_anim(void) {
 }
 
 /* ---- Behavior command entry ---- */
-
 int rgb_petra_command(uint8_t cmd, uint8_t param) {
     ARG_UNUSED(param);
-    LOG_INF("rgb_petra_command cmd=%d (on=%d effect=%d)", cmd, state.on, state.effect);
 
     switch (cmd) {
     case RGB_PETRA_CMD_TOGGLE:
@@ -304,10 +225,11 @@ int rgb_petra_command(uint8_t cmd, uint8_t param) {
         state.on = false;
         break;
     case RGB_PETRA_CMD_EFF_NEXT:
-        state.effect = (state.effect + 1) % RGB_PETRA_EFF_NUM;
+        state.effect = (state.effect + 1) % RGB_PETRA_EFF_ACTIVE_END;
         break;
     case RGB_PETRA_CMD_EFF_PREV:
-        state.effect = (state.effect + RGB_PETRA_EFF_NUM - 1) % RGB_PETRA_EFF_NUM;
+        state.effect = (state.effect + RGB_PETRA_EFF_ACTIVE_END - 1)
+                       % RGB_PETRA_EFF_ACTIVE_END;
         break;
     case RGB_PETRA_CMD_HUE_UP:
         state.hue = (state.hue + CONFIG_RGB_PETRA_HUE_STEP) % 360;
@@ -323,6 +245,12 @@ int rgb_petra_command(uint8_t cmd, uint8_t param) {
                         ? state.brt - CONFIG_RGB_PETRA_BRT_STEP
                         : 0;
         break;
+    case RGB_PETRA_CMD_SPD_UP:
+        if (state.speed < 10) state.speed++;
+        break;
+    case RGB_PETRA_CMD_SPD_DN:
+        if (state.speed > 1) state.speed--;
+        break;
     default:
         return -ENOTSUP;
     }
@@ -336,7 +264,6 @@ int rgb_petra_command(uint8_t cmd, uint8_t param) {
 }
 
 /* ---- Key event listener: mark reactive intensity only ---- */
-
 static int rgb_petra_key_listener(const zmk_event_t *eh) {
     const struct zmk_position_state_changed *ev = as_zmk_position_state_changed(eh);
     if (ev == NULL || !ev->state) {
@@ -344,8 +271,9 @@ static int rgb_petra_key_listener(const zmk_event_t *eh) {
     }
     if (ev->position < RGB_PETRA_NUM_KEYS) {
         uint8_t led = key_to_led[ev->position];
-        if (led < STRIP_NUM_PIXELS) {
+        if (led < RGB_PETRA_NUM_KEYS) {
             reactive[led] = 255;
+            rgbp_reactive_note_press(led);
         }
     }
     return ZMK_EV_EVENT_BUBBLE;
@@ -355,7 +283,6 @@ ZMK_LISTENER(rgb_petra_keys, rgb_petra_key_listener);
 ZMK_SUBSCRIPTION(rgb_petra_keys, zmk_position_state_changed);
 
 /* ---- Idle handling ---- */
-
 #if IS_ENABLED(CONFIG_RGB_PETRA_AUTO_OFF_IDLE)
 static int rgb_petra_activity_listener(const zmk_event_t *eh) {
     const struct zmk_activity_state_changed *ev = as_zmk_activity_state_changed(eh);
@@ -377,20 +304,13 @@ ZMK_SUBSCRIPTION(rgb_petra_activity, zmk_activity_state_changed);
 #endif
 
 /* ---- Init ---- */
-
 static int rgb_petra_init(void) {
-    LOG_INF("rgb_petra init: start_on=%d effect=%d strip=%p",
-            state.on, state.effect, (void *)led_strip);
-
     if (!device_is_ready(led_strip)) {
         LOG_ERR("LED strip device NOT ready");
         return -ENODEV;
     }
-    LOG_INF("LED strip ready, %d pixels", STRIP_NUM_PIXELS);
-
     if (state.on) {
         start_anim();
-        LOG_INF("animation started");
     }
     return 0;
 }
