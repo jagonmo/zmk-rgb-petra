@@ -163,16 +163,8 @@ void rgbp_render_reactive(enum rgb_petra_effect eff) {
     case RGB_PETRA_EFF_DIGITAL_RAIN:              e_digital_rain(); break;
     case RGB_PETRA_EFF_SOLID_REACTIVE_SIMPLE:     e_reactive_simple(); break;
     case RGB_PETRA_EFF_SOLID_REACTIVE:            e_reactive(); break;
-    case RGB_PETRA_EFF_SOLID_REACTIVE_WIDE:       e_spatial(0, false, false); break;
-    case RGB_PETRA_EFF_SOLID_REACTIVE_MULTIWIDE:  e_spatial(0, true,  false); break;
-    case RGB_PETRA_EFF_SOLID_REACTIVE_CROSS:      e_spatial(1, false, false); break;
-    case RGB_PETRA_EFF_SOLID_REACTIVE_MULTICROSS: e_spatial(1, true,  false); break;
-    case RGB_PETRA_EFF_SOLID_REACTIVE_NEXUS:      e_spatial(2, false, false); break;
-    case RGB_PETRA_EFF_SOLID_REACTIVE_MULTINEXUS: e_spatial(2, true,  false); break;
+    case RGB_PETRA_EFF_SOLID_REACTIVE_CROSS:      e_spatial(1, true,  false); break;
     case RGB_PETRA_EFF_SPLASH:                    e_spatial(3, true,  false); break;
-    case RGB_PETRA_EFF_MULTISPLASH:               e_spatial(3, true,  false); break;
-    case RGB_PETRA_EFF_SOLID_SPLASH:              e_spatial(3, false, true); break;
-    case RGB_PETRA_EFF_SOLID_MULTISPLASH:         e_spatial(3, true,  true); break;
     default: {
         struct led_rgb base = rgbp_hsb(state.hue, state.sat, state.brt / 6);
         for (int i = 0; i < NKEYS; i++) {
