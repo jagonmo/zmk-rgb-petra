@@ -78,6 +78,7 @@ struct rgb_petra_state {
     uint16_t hue;   /* 0-359 */
     uint8_t sat;    /* 0-100 */
     uint8_t brt;    /* 0-100 */
+    uint8_t speed;  /* 1-10, default 4 */
     uint16_t phase; /* animation counter, ++ each frame */
 };
 

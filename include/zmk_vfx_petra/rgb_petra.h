@@ -16,6 +16,8 @@
 #define RGB_PETRA_CMD_HUE_DN   6
 #define RGB_PETRA_CMD_BRT_UP   7
 #define RGB_PETRA_CMD_BRT_DN   8
+#define RGB_PETRA_CMD_SPD_UP   9   /* speed increase */
+#define RGB_PETRA_CMD_SPD_DN   10  /* speed decrease */
 
 /* Entry point used by the behavior driver. */
 int rgb_petra_command(uint8_t cmd, uint8_t param);

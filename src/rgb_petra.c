@@ -24,7 +24,6 @@
 
 #if IS_ENABLED(CONFIG_RGB_PETRA_CAPS_INDICATOR)
 #include <zmk/hid_indicators.h>
-#include <dt-bindings/zmk/hid_indicators.h>
 #endif
 
 #include <zmk_vfx_petra/rgb_petra.h>
@@ -51,6 +50,7 @@ struct rgb_petra_state state = {
     .hue = 0,
     .sat = 100,
     .brt = CONFIG_RGB_PETRA_BRT_START,
+    .speed = 4,
 };
 
 /* Physical column (0-13) and row (0-5) of each LED, from serpentine wiring. */
@@ -123,7 +123,8 @@ static void decay_reactive(void) {
 #if IS_ENABLED(CONFIG_RGB_PETRA_CAPS_INDICATOR)
 static void caps_overlay(void) {
     zmk_hid_indicators_t ind = zmk_hid_indicators_get_current_profile();
-    if (!(ind & ZMK_LED_CAPSLOCK_BIT)) {
+    /* Caps lock = bit 1 (0x02) per USB HID spec. */
+    if (!(ind & 0x02)) {
         return;
     }
     /* blink: on for ~half a second, off for ~half a second (at ~30fps) */
@@ -171,7 +172,7 @@ static void rgb_petra_tick(struct k_work *work) {
         LOG_ERR("led_strip_update_rgb failed: %d", err);
     }
 
-    state.phase++;
+    state.phase += state.speed;
     k_work_reschedule(&rgb_petra_work, K_MSEC(CONFIG_RGB_PETRA_TICK_MS));
 }
 
@@ -243,6 +244,12 @@ int rgb_petra_command(uint8_t cmd, uint8_t param) {
         state.brt = (state.brt > CONFIG_RGB_PETRA_BRT_STEP)
                         ? state.brt - CONFIG_RGB_PETRA_BRT_STEP
                         : 0;
+        break;
+    case RGB_PETRA_CMD_SPD_UP:
+        if (state.speed < 10) state.speed++;
+        break;
+    case RGB_PETRA_CMD_SPD_DN:
+        if (state.speed > 1) state.speed--;
         break;
     default:
         return -ENOTSUP;
